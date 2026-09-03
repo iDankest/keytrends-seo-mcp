@@ -214,7 +214,8 @@ Ninguno de estos campos permite segmentar impresiones exclusivas de AI Overviews
         ```
      El provider descarga cada CSV con `Authorization: Bearer <token>` (tope 10 MB por fichero),
      clasifica por nombre canónico (`search-ai-dates.csv`, `search-ai-pages.csv`, `discover-ai-dates.csv`,
-     `discover-ai-pages.csv`) y avisa en `provenance.notes` si el export tiene más de 30 días.
+     `discover-ai-pages.csv`). `provenance.notes` indica el fichero usado y la fecha de export cuando GitHub la expone
+     (cabecera `Last-Modified`; con URLs `raw` suele aparecer «fecha de export desconocida»).
    - **Flujo directorio (solo ejecución local):**
      ```env
      KEYTRENDS_AI_PROVIDER=gsc_export
