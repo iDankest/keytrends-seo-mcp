@@ -6,7 +6,7 @@ import { RefreshTokenSource } from './providers/gsc/oauth.js';
 import { createHttpClient, type HttpClient } from './utils/http.js';
 import { createLogger, type Logger } from './utils/logger.js';
 
-export const PACKAGE_VERSION = '0.1.0';
+export const PACKAGE_VERSION = '0.2.0';
 
 export interface ToolContext {
   version: string;

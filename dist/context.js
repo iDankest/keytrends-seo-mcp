@@ -5,7 +5,7 @@ import { GscClient } from './providers/gsc/client.js';
 import { RefreshTokenSource } from './providers/gsc/oauth.js';
 import { createHttpClient } from './utils/http.js';
 import { createLogger } from './utils/logger.js';
-export const PACKAGE_VERSION = '0.1.0';
+export const PACKAGE_VERSION = '0.2.0';
 export function buildContext(env = process.env, overrides) {
     const { config, missing, warnings } = loadConfig(env);
     const logger = overrides?.logger ?? createLogger(config.logLevel);

@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EXPORT_GSC_UI, measured } from '../../models/provenance.js';
 import { findColumn, normalizeHeader, parseCsv, parseIntLoose } from '../../utils/csv.js';
+import { createHttpClient } from '../../utils/http.js';
 const ALIASES = {
     date: ['date', 'fecha', 'dia'],
     page: ['page', 'pages', 'top pages', 'pagina', 'paginas', 'paginas principales', 'url'],
@@ -9,14 +10,160 @@ const ALIASES = {
     device: ['device', 'devices', 'dispositivo', 'dispositivos'],
     impressions: ['impressions', 'impresiones'],
 };
+const MAX_EXPORT_CSV_CHARS = 10 * 1024 * 1024; // tope de 10 MB por CSV remoto
+const STALE_EXPORT_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
+/** Clasifica un nombre de fichero (o el último segmento de una URL) en (surface, dimension). */
+export function classifyCsvName(pathOrName) {
+    const lower = pathOrName.toLowerCase();
+    const base = lower.split(/[\\/]/).pop() ?? lower;
+    const surface = lower.includes('discover') ? 'DISCOVER' : 'SEARCH';
+    const baseNorm = normalizeHeader(base.replace(/\.csv$/i, ''));
+    let dimension = 'unknown';
+    if (baseNorm.includes('date') || baseNorm.includes('fecha') || baseNorm.includes('dia')) {
+        dimension = 'date';
+    }
+    else if (baseNorm.includes('page') ||
+        baseNorm.includes('pagina') ||
+        baseNorm.includes('url')) {
+        dimension = 'page';
+    }
+    else if (baseNorm.includes('countr') || baseNorm.includes('pais')) {
+        dimension = 'country';
+    }
+    else if (baseNorm.includes('device') || baseNorm.includes('dispositivo')) {
+        dimension = 'device';
+    }
+    return { surface, dimension };
+}
+function parseHttpDate(value) {
+    const parsed = new Date(value);
+    return isNaN(parsed.getTime()) ? null : parsed;
+}
+/** Último segmento del path de la URL, decodificado; fallback seguro. */
+function csvNameFromUrl(url) {
+    let pathname = url;
+    try {
+        pathname = new URL(url).pathname;
+    }
+    catch {
+        // URL relativa o malformada: usar el string tal cual
+    }
+    const segment = pathname.split('/').filter(Boolean).pop();
+    if (!segment)
+        return 'export.csv';
+    try {
+        return decodeURIComponent(segment);
+    }
+    catch {
+        return segment;
+    }
+}
+function formatFileNote(rec) {
+    return rec.mtime
+        ? `${rec.name} (${rec.mtime.toISOString()})`
+        : `${rec.name} (fecha de export desconocida)`;
+}
+function stalenessNote(records) {
+    const known = records.map((r) => r.mtime).filter((m) => m !== null);
+    if (known.length === 0)
+        return null;
+    const newest = known.reduce((a, b) => (b.getTime() > a.getTime() ? b : a));
+    if (Date.now() - newest.getTime() > STALE_EXPORT_MS) {
+        return `Export con antigüedad ≥30 días (${newest.toISOString()}); refresca con scripts/publish-ai-export.mjs`;
+    }
+    return null;
+}
 export class GscExportAiVisibilityProvider {
     id = 'gsc_export';
     exportDir;
+    urls = null;
+    token = null;
+    httpClient = null;
     logger;
+    urlErrors = [];
+    loadFailed = false;
     constructor(exportDir, logger) {
         this.exportDir = exportDir;
         this.logger = logger;
     }
+    /**
+     * Factoría para el modo URL: descarga cada CSV remoto (GET con
+     * `Authorization: Bearer <token>` si hay token). `httpClient` es inyectable
+     * para tests.
+     */
+    static fromUrls(urls, opts) {
+        const provider = new GscExportAiVisibilityProvider(null, opts.logger);
+        provider.urls = [...urls];
+        provider.token = opts.token;
+        provider.httpClient =
+            opts.httpClient ??
+                createHttpClient({
+                    timeoutMs: opts.timeoutMs,
+                    userAgent: '@keytrends/seo-mcp',
+                    logger: opts.logger,
+                });
+        return provider;
+    }
+    get sourceLabel() {
+        return this.urls ? 'KEYTRENDS_AI_EXPORT_URL' : String(this.exportDir);
+    }
+    /** Carga unificada: descarga remota por URL o descubrimiento en directorio local. */
+    async loadCsvs() {
+        if (this.urls) {
+            return this.fetchCsvsFromUrls();
+        }
+        return this.discoverCsvFiles();
+    }
+    async fetchCsvsFromUrls() {
+        this.urlErrors = [];
+        const records = [];
+        const headers = {};
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+        for (const url of this.urls) {
+            try {
+                const resp = await this.httpClient.request(url, { method: 'GET', headers });
+                if (!resp.ok) {
+                    this.urlErrors.push(`${url} → HTTP ${resp.status}`);
+                    continue;
+                }
+                if (resp.text.length > MAX_EXPORT_CSV_CHARS) {
+                    this.urlErrors.push(`${url} → contenido demasiado grande (>10 MB)`);
+                    continue;
+                }
+                const lastModified = resp.headers.get('last-modified');
+                const mtime = lastModified ? parseHttpDate(lastModified) : null;
+                const name = csvNameFromUrl(url);
+                const classified = classifyCsvName(name);
+                records.push({
+                    name,
+                    surface: classified.surface,
+                    dimension: classified.dimension,
+                    mtime,
+                    content: resp.text,
+                });
+            }
+            catch (err) {
+                this.urlErrors.push(`${url} → ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+        this.loadFailed = records.length === 0;
+        return records;
+    }
+    /** Nota de provenance: fichero primario + fallos parciales de URL + antigüedad. */
+    composeNotes(primary, records) {
+        const parts = [];
+        if (primary)
+            parts.push(formatFileNote(primary));
+        if (this.urlErrors.length > 0)
+            parts.push(`URLs fallidas: ${this.urlErrors.join('; ')}`);
+        const stale = stalenessNote(records);
+        if (stale)
+            parts.push(stale);
+        return parts.length > 0 ? parts.join('; ') : undefined;
+    }
+    /** Modo directorio: escanea el árbol (profundidad 1) leyendo cada CSV. */
     async discoverCsvFiles() {
         const files = [];
         async function scanDir(dir, depth) {
@@ -36,33 +183,13 @@ export class GscExportAiVisibilityProvider {
                 }
                 else if (entry.isFile() && entry.name.toLowerCase().endsWith('.csv')) {
                     const stats = await stat(fullPath);
-                    const lowerName = entry.name.toLowerCase();
-                    const lowerPath = fullPath.toLowerCase();
-                    const surface = lowerName.includes('discover') || lowerPath.includes('discover')
-                        ? 'DISCOVER'
-                        : 'SEARCH';
-                    const baseNorm = normalizeHeader(entry.name.replace(/\.csv$/i, ''));
-                    let dimension = 'unknown';
-                    if (baseNorm.includes('date') || baseNorm.includes('fecha') || baseNorm.includes('dia')) {
-                        dimension = 'date';
-                    }
-                    else if (baseNorm.includes('page') ||
-                        baseNorm.includes('pagina') ||
-                        baseNorm.includes('url')) {
-                        dimension = 'page';
-                    }
-                    else if (baseNorm.includes('countr') || baseNorm.includes('pais')) {
-                        dimension = 'country';
-                    }
-                    else if (baseNorm.includes('device') || baseNorm.includes('dispositivo')) {
-                        dimension = 'device';
-                    }
+                    const classified = classifyCsvName(fullPath);
                     files.push({
-                        path: fullPath,
                         name: entry.name,
-                        surface,
-                        dimension,
+                        surface: classified.surface,
+                        dimension: classified.dimension,
                         mtime: stats.mtime,
+                        content: await readFile(fullPath, 'utf8'),
                     });
                 }
             }
@@ -71,17 +198,28 @@ export class GscExportAiVisibilityProvider {
         return files;
     }
     async getSummary(args) {
-        const files = await this.discoverCsvFiles();
+        const files = await this.loadCsvs();
+        if (this.loadFailed) {
+            return {
+                available: false,
+                surface: args.surface,
+                reason: `No se pudieron descargar los CSV de KEYTRENDS_AI_EXPORT_URL: ${this.urlErrors.join('; ')}`,
+                provenance: {
+                    ...EXPORT_GSC_UI,
+                    retrieved_at: new Date().toISOString(),
+                },
+            };
+        }
         const surfaceFiles = files.filter((f) => f.surface === args.surface);
         if (surfaceFiles.length === 0) {
             return {
                 available: false,
                 surface: args.surface,
-                reason: `No se encontraron ficheros CSV para la superficie ${args.surface} en ${this.exportDir}`,
+                reason: `No se encontraron ficheros CSV para la superficie ${args.surface} en ${this.sourceLabel}`,
                 provenance: {
                     ...EXPORT_GSC_UI,
                     retrieved_at: new Date().toISOString(),
-                    notes: `Directorio de exportación: ${this.exportDir}`,
+                    notes: this.urls ? `URLs configuradas: ${this.urls.join(', ')}` : `Directorio de exportación: ${this.exportDir}`,
                 },
             };
         }
@@ -96,8 +234,7 @@ export class GscExportAiVisibilityProvider {
         let primaryFile;
         if (dateFile) {
             primaryFile = dateFile;
-            const content = await readFile(dateFile.path, 'utf8');
-            const rows = parseCsv(content);
+            const rows = parseCsv(dateFile.content);
             if (rows.length < 2) {
                 return {
                     available: false,
@@ -146,8 +283,7 @@ export class GscExportAiVisibilityProvider {
         if (pageFile) {
             if (!primaryFile)
                 primaryFile = pageFile;
-            const content = await readFile(pageFile.path, 'utf8');
-            const rows = parseCsv(content);
+            const rows = parseCsv(pageFile.content);
             if (rows.length >= 2) {
                 const header = rows[0];
                 const pageIdx = findColumn(header, ALIASES.page);
@@ -178,8 +314,7 @@ export class GscExportAiVisibilityProvider {
         if (countryFile) {
             if (!primaryFile)
                 primaryFile = countryFile;
-            const content = await readFile(countryFile.path, 'utf8');
-            const rows = parseCsv(content);
+            const rows = parseCsv(countryFile.content);
             if (rows.length >= 2) {
                 const header = rows[0];
                 const countryIdx = findColumn(header, ALIASES.country);
@@ -205,8 +340,7 @@ export class GscExportAiVisibilityProvider {
         if (deviceFile) {
             if (!primaryFile)
                 primaryFile = deviceFile;
-            const content = await readFile(deviceFile.path, 'utf8');
-            const rows = parseCsv(content);
+            const rows = parseCsv(deviceFile.content);
             if (rows.length >= 2) {
                 const header = rows[0];
                 const deviceIdx = findColumn(header, ALIASES.device);
@@ -228,6 +362,7 @@ export class GscExportAiVisibilityProvider {
                 }
             }
         }
+        const notes = this.composeNotes(primaryFile, files);
         if (!impressionsCounted) {
             return {
                 available: false,
@@ -236,13 +371,13 @@ export class GscExportAiVisibilityProvider {
                 provenance: {
                     ...EXPORT_GSC_UI,
                     retrieved_at: new Date().toISOString(),
-                    notes: primaryFile ? `${primaryFile.name} (${primaryFile.mtime.toISOString()})` : undefined,
+                    notes,
                 },
             };
         }
         const provenanceBase = {
             ...EXPORT_GSC_UI,
-            notes: primaryFile ? `${primaryFile.name} (${primaryFile.mtime.toISOString()})` : undefined,
+            notes,
         };
         return {
             available: true,
@@ -255,12 +390,26 @@ export class GscExportAiVisibilityProvider {
             provenance: {
                 ...EXPORT_GSC_UI,
                 retrieved_at: new Date().toISOString(),
-                notes: primaryFile ? `${primaryFile.name} (${primaryFile.mtime.toISOString()})` : undefined,
+                notes,
             },
         };
     }
     async getPages(args) {
-        const files = await this.discoverCsvFiles();
+        const files = await this.loadCsvs();
+        if (this.loadFailed) {
+            return {
+                available: false,
+                surface: args.surface,
+                rows: [],
+                truncated: false,
+                total_rows_in_source: null,
+                reason: `No se pudieron descargar los CSV de KEYTRENDS_AI_EXPORT_URL: ${this.urlErrors.join('; ')}`,
+                provenance: {
+                    ...EXPORT_GSC_UI,
+                    retrieved_at: new Date().toISOString(),
+                },
+            };
+        }
         const pageFile = files.find((f) => f.surface === args.surface && f.dimension === 'page');
         if (!pageFile) {
             return {
@@ -269,16 +418,15 @@ export class GscExportAiVisibilityProvider {
                 rows: [],
                 truncated: false,
                 total_rows_in_source: null,
-                reason: `No se encontró fichero de páginas CSV para la superficie ${args.surface} en ${this.exportDir}`,
+                reason: `No se encontró fichero de páginas CSV para la superficie ${args.surface} en ${this.sourceLabel}`,
                 provenance: {
                     ...EXPORT_GSC_UI,
                     retrieved_at: new Date().toISOString(),
-                    notes: `Directorio: ${this.exportDir}`,
+                    notes: this.urls ? `URLs configuradas: ${this.urls.join(', ')}` : `Directorio: ${this.exportDir}`,
                 },
             };
         }
-        const content = await readFile(pageFile.path, 'utf8');
-        const rows = parseCsv(content);
+        const rows = parseCsv(pageFile.content);
         if (rows.length < 2) {
             return {
                 available: false,
@@ -340,12 +488,25 @@ export class GscExportAiVisibilityProvider {
             provenance: {
                 ...EXPORT_GSC_UI,
                 retrieved_at: new Date().toISOString(),
-                notes: `${pageFile.name} (${pageFile.mtime.toISOString()})`,
+                notes: this.composeNotes(pageFile, files),
             },
         };
     }
     async getTimeseries(args) {
-        const files = await this.discoverCsvFiles();
+        const files = await this.loadCsvs();
+        if (this.loadFailed) {
+            return {
+                available: false,
+                surface: args.surface,
+                granularity: args.granularity,
+                points: [],
+                reason: `No se pudieron descargar los CSV de KEYTRENDS_AI_EXPORT_URL: ${this.urlErrors.join('; ')}`,
+                provenance: {
+                    ...EXPORT_GSC_UI,
+                    retrieved_at: new Date().toISOString(),
+                },
+            };
+        }
         const dateFile = files.find((f) => f.surface === args.surface && f.dimension === 'date');
         if (!dateFile) {
             return {
@@ -353,16 +514,15 @@ export class GscExportAiVisibilityProvider {
                 surface: args.surface,
                 granularity: args.granularity,
                 points: [],
-                reason: `No se encontró fichero de fechas CSV para la superficie ${args.surface} en ${this.exportDir}`,
+                reason: `No se encontró fichero de fechas CSV para la superficie ${args.surface} en ${this.sourceLabel}`,
                 provenance: {
                     ...EXPORT_GSC_UI,
                     retrieved_at: new Date().toISOString(),
-                    notes: `Directorio: ${this.exportDir}`,
+                    notes: this.urls ? `URLs configuradas: ${this.urls.join(', ')}` : `Directorio: ${this.exportDir}`,
                 },
             };
         }
-        const content = await readFile(dateFile.path, 'utf8');
-        const rows = parseCsv(content);
+        const rows = parseCsv(dateFile.content);
         if (rows.length < 2) {
             return {
                 available: false,
@@ -444,7 +604,7 @@ export class GscExportAiVisibilityProvider {
             provenance: {
                 ...EXPORT_GSC_UI,
                 retrieved_at: new Date().toISOString(),
-                notes: `${dateFile.name} (${dateFile.mtime.toISOString()})`,
+                notes: this.composeNotes(dateFile, files),
             },
         };
     }

@@ -193,12 +193,34 @@ Ninguno de estos campos permite segmentar impresiones exclusivas de AI Overviews
      - Search: `https://search.google.com/search-console/performance/search-analytics/ai`
      - Discover: `https://search.google.com/search-console/performance/discover/ai`
    - Pulsa en **Exportar → Descargar CSV**.
-   - Coloca los archivos descomprimidos en un directorio accesible en tu servidor o entorno.
-   - Configura las variables:
+   - **Flujo URL (recomendado para Cognitiv):** publica los CSV en el repo privado
+     [`iDankest/keytrends-gsc-ai-exports`](https://github.com/iDankest/keytrends-gsc-ai-exports) y configura el
+     server por URL, sin depender de un directorio local del runner:
+     1. Exporta el CSV de la tabla por fechas y por páginas desde la UI de GSC.
+     2. Publica cada CSV (requiere `gh` CLI autenticado):
+        ```bash
+        node scripts/publish-ai-export.mjs Descargas/Tabla\ de\ fechas.csv --as search-dates
+        node scripts/publish-ai-export.mjs Descargas/Tabla\ de\ páginas.csv --as search-pages
+        ```
+        El script imprime la línea `KEYTRENDS_AI_EXPORT_URL=<url1>,<url2>` lista para pegar.
+     3. Crea un **PAT fine-grained de solo lectura**: `github.com/settings/personal-access-tokens`
+        → **Generate new token** → *Fine-grained tokens* → Repository access: *Only select repositories* →
+        `iDankest/keytrends-gsc-ai-exports` → Permissions → **Contents: Read-only**.
+     4. En el panel de credenciales de la tool de Cognitiv añade:
+        ```env
+        KEYTRENDS_AI_PROVIDER=auto
+        KEYTRENDS_AI_EXPORT_URL=<la línea que imprimió el script>
+        KEYTRENDS_AI_EXPORT_TOKEN=github_pat_xxxxxxxxxxxx
+        ```
+     El provider descarga cada CSV con `Authorization: Bearer <token>` (tope 10 MB por fichero),
+     clasifica por nombre canónico (`search-ai-dates.csv`, `search-ai-pages.csv`, `discover-ai-dates.csv`,
+     `discover-ai-pages.csv`) y avisa en `provenance.notes` si el export tiene más de 30 días.
+   - **Flujo directorio (solo ejecución local):**
      ```env
      KEYTRENDS_AI_PROVIDER=gsc_export
      KEYTRENDS_AI_EXPORT_DIR=/ruta/a/tus/csvs
      ```
+     Si se configuran ambas, `KEYTRENDS_AI_EXPORT_URL` tiene prioridad sobre `KEYTRENDS_AI_EXPORT_DIR`.
 2. **Opción B (Pendiente de publicación por Google):**
    - Que Google amplíe la API v1 o publique una API v2 con enums o recursos dedicados de IA. Este servidor MCP detectará la presencia releyendo el discovery de la API.
 3. **Opción C (Exportación masiva a BigQuery):**
@@ -233,8 +255,9 @@ npx -y github:iDankest/keytrends-seo-mcp --healthcheck
 | `GOOGLE_REFRESH_TOKEN` | Sí | — | Refresh token con scope `https://www.googleapis.com/auth/webmasters.readonly`. |
 | `KEYTRENDS_SITE_URL` | No | Derivado de `GSC_PROPERTY` | Origen público del sitio web con barra final para peticiones directas. |
 | `KEYTRENDS_SITEMAP_URL` | No | Autodetectado | Entrypoint explícito del sitemap si no sigue las convenciones estándar. |
-| `KEYTRENDS_AI_PROVIDER` | No | `auto` | Modo del proveedor de IA: `auto`, `none` o `gsc_export`. |
-| `KEYTRENDS_AI_EXPORT_DIR` | No | — | Ruta absoluta o relativa al directorio con exportaciones CSV de la UI de GSC. |
+| `KEYTRENDS_AI_EXPORT_DIR` | No | — | Ruta absoluta o relativa al directorio con exportaciones CSV de la UI de GSC (solo ejecución local). |
+| `KEYTRENDS_AI_EXPORT_URL` | No | — | Lista de URLs (separadas por comas) de los CSV del informe de IA en `iDankest/keytrends-gsc-ai-exports`. Tiene prioridad sobre `KEYTRENDS_AI_EXPORT_DIR`. Generada por `scripts/publish-ai-export.mjs`. |
+| `KEYTRENDS_AI_EXPORT_TOKEN` | Sí (solo con `KEYTRENDS_AI_EXPORT_URL`) | — | PAT fine-grained de GitHub de solo lectura (Contents: Read-only) sobre el repo de datos. |
 | `KEYTRENDS_LOG_LEVEL` | No | `info` | Nivel de registro a stderr: `silent`, `error`, `warn`, `info`, `debug`. |
 | `KEYTRENDS_HTTP_TIMEOUT_MS` | No | `20000` | Timeout máximo en milisegundos por petición HTTP saliente. |
 | `KEYTRENDS_MAX_INSPECT_URLS` | No | `50` | Límite máximo de seguridad para URLs inspeccionadas por lote. |

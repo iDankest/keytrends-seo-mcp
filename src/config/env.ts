@@ -6,8 +6,10 @@ export interface ResolvedConfig {
   siteUrl: string | null; // siempre con barra final
   sitemapUrl: string | null;
   google: { clientId: string; clientSecret: string; refreshToken: string } | null;
-  aiProviderMode: 'auto' | 'none' | 'gsc_export';
   aiExportDir: string | null;
+  aiProviderMode: 'auto' | 'none' | 'gsc_export';
+  aiExportUrls: string[];
+  aiExportToken: string | null;
   logLevel: LogLevel;
   httpTimeoutMs: number;
   maxInspectUrls: number;
@@ -96,6 +98,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigLoadResu
 
   const siteUrl = deriveSiteUrl(rawProperty, env.KEYTRENDS_SITE_URL);
   const sitemapUrl = env.KEYTRENDS_SITEMAP_URL?.trim() || null;
+  const aiExportUrls: string[] = [];
+  const rawAiExportUrls = env.KEYTRENDS_AI_EXPORT_URL?.trim();
+  if (rawAiExportUrls) {
+    for (const part of rawAiExportUrls.split(',')) {
+      const url = part.trim();
+      if (!url) continue;
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        aiExportUrls.push(url);
+      } else {
+        warnings.push(`KEYTRENDS_AI_EXPORT_URL contiene una URL inválida ('${url}'); ignorada.`);
+      }
+    }
+  }
+  const aiExportToken = env.KEYTRENDS_AI_EXPORT_TOKEN?.trim() || null;
   const aiExportDir = env.KEYTRENDS_AI_EXPORT_DIR?.trim() || null;
 
   let logLevel: LogLevel = 'info';
@@ -153,6 +169,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigLoadResu
     google,
     aiProviderMode,
     aiExportDir,
+    aiExportUrls,
+    aiExportToken,
     logLevel,
     httpTimeoutMs,
     maxInspectUrls,

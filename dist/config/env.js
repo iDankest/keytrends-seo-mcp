@@ -65,6 +65,22 @@ export function loadConfig(env = process.env) {
         : null;
     const siteUrl = deriveSiteUrl(rawProperty, env.KEYTRENDS_SITE_URL);
     const sitemapUrl = env.KEYTRENDS_SITEMAP_URL?.trim() || null;
+    const aiExportUrls = [];
+    const rawAiExportUrls = env.KEYTRENDS_AI_EXPORT_URL?.trim();
+    if (rawAiExportUrls) {
+        for (const part of rawAiExportUrls.split(',')) {
+            const url = part.trim();
+            if (!url)
+                continue;
+            if (url.startsWith('http://') || url.startsWith('https://')) {
+                aiExportUrls.push(url);
+            }
+            else {
+                warnings.push(`KEYTRENDS_AI_EXPORT_URL contiene una URL inválida ('${url}'); ignorada.`);
+            }
+        }
+    }
+    const aiExportToken = env.KEYTRENDS_AI_EXPORT_TOKEN?.trim() || null;
     const aiExportDir = env.KEYTRENDS_AI_EXPORT_DIR?.trim() || null;
     let logLevel = 'info';
     if (env.KEYTRENDS_LOG_LEVEL) {
@@ -113,6 +129,8 @@ export function loadConfig(env = process.env) {
         google,
         aiProviderMode,
         aiExportDir,
+        aiExportUrls,
+        aiExportToken,
         logLevel,
         httpTimeoutMs,
         maxInspectUrls,

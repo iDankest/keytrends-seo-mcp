@@ -47,6 +47,16 @@ export function resolveAiProvider(
   }
 
   if (cfg.aiProviderMode === 'gsc_export') {
+    if (cfg.aiExportUrls.length > 0) {
+      if (cfg.aiExportDir) {
+        deps.logger.warn('KEYTRENDS_AI_EXPORT_URL tiene prioridad sobre KEYTRENDS_AI_EXPORT_DIR');
+      }
+      return GscExportAiVisibilityProvider.fromUrls(cfg.aiExportUrls, {
+        token: cfg.aiExportToken,
+        timeoutMs: cfg.httpTimeoutMs,
+        logger: deps.logger,
+      });
+    }
     if (!cfg.aiExportDir || !existsSync(cfg.aiExportDir)) {
       deps.logger.warn(
         'KEYTRENDS_AI_PROVIDER=gsc_export fijado pero KEYTRENDS_AI_EXPORT_DIR no está configurado o no existe; usando NoAiVisibilityProvider'
@@ -57,6 +67,20 @@ export function resolveAiProvider(
   }
 
   // mode === 'auto'
+  if (cfg.aiExportUrls.length > 0) {
+    if (cfg.aiExportDir) {
+      deps.logger.warn('KEYTRENDS_AI_EXPORT_URL tiene prioridad sobre KEYTRENDS_AI_EXPORT_DIR');
+    }
+    deps.logger.info(
+      `AI provider auto-detectado: gsc_export con KEYTRENDS_AI_EXPORT_URL (${cfg.aiExportUrls.length} URL(s))`
+    );
+    return GscExportAiVisibilityProvider.fromUrls(cfg.aiExportUrls, {
+      token: cfg.aiExportToken,
+      timeoutMs: cfg.httpTimeoutMs,
+      logger: deps.logger,
+    });
+  }
+
   if (cfg.aiExportDir && directoryHasCsv(cfg.aiExportDir)) {
     deps.logger.info(
       `AI provider auto-detectado: gsc_export con directorio ${cfg.aiExportDir}`
