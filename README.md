@@ -7,7 +7,7 @@ Servidor MCP (*Model Context Protocol*) ejecutable mediante transporte `stdio` q
 ## 1. Qué es y qué NO es
 
 ### Qué es:
-- Un servidor MCP desacoplado y publicable en npm como `@keytrends/seo-mcp`.
+- Un servidor MCP desacoplado, publicado como repo público `github:iDankest/keytrends-seo-mcp` (ejecutable hoy con `npx -y github:iDankest/keytrends-seo-mcp`) y publicable en npm como `@keytrends/seo-mcp`.
 - Diseñado para conectarse directamente a **Cognitiv** mediante "Custom tool → stdio" sin requerir cambios de código en Cognitiv.
 - Expone exactamente **7 herramientas especializadas** que cubren salud de configuración, resumen ejecutivo, rendimiento detallado, visibilidad en IA (AEO), páginas citadas por IA, inspección de indexación masiva y salud de sitemaps.
 - Cada respuesta es un sobre JSON con metadatos de procedencia (`source`, `source_type`, `confidence`, `retrieved_at`) y advertencias metodológicas oficiales.
@@ -33,9 +33,9 @@ Configura el formulario con estos valores exactos:
 | **Tool Name** | `Keytrends SEO MCP` |
 | **Connection Type** | `stdio` |
 | **Command** | `npx` |
-| **Arguments** | `-y`<br>`@keytrends/seo-mcp` *(en líneas separadas)* |
+| **Arguments** | `-y`<br>`github:iDankest/keytrends-seo-mcp` *(en líneas separadas)* |
 
-*(Nota de contingencia: si la versión de npm en el runner no resuelve el paquete scoped directamente, usa los argumentos alternativos: `-y`, `-p`, `@keytrends/seo-mcp`, `keytrends-seo-mcp`).*
+*(Nota: `npx` descarga y ejecuta el paquete desde el repo público de GitHub en cada arranque en frío; no requiere publicación en npm. Cuando el paquete se publique en npm como `@keytrends/seo-mcp`, el argumento puede acortarse a `-y` + `@keytrends/seo-mcp`. Si el runner no resuelve paquetes scoped, usa los argumentos alternativos: `-y`, `-p`, `github:iDankest/keytrends-seo-mcp`, `keytrends-seo-mcp`.)*
 
 ### Variables de entorno (Credentials):
 
@@ -213,7 +213,7 @@ Ninguno de estos campos permite segmentar impresiones exclusivas de AI Overviews
 El servidor incluye un modo de diagnóstico ejecutable sin iniciar el protocolo MCP:
 
 ```bash
-npx -y @keytrends/seo-mcp --healthcheck
+npx -y github:iDankest/keytrends-seo-mcp --healthcheck
 ```
 
 - Salida: Informe JSON completo en `stdout` detallando cada comprobación, latencias y capacidades activas.
