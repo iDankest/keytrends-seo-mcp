@@ -1,0 +1,40 @@
+{
+  "name": "@keytrends/seo-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing Keytrends SEO/AEO tools backed by the Google Search Console API",
+  "author": "Keytrends",
+  "repository": { "type": "git", "url": "git+https://github.com/iDankest/keytrends-seo-mcp.git" },
+  "bugs": { "url": "https://github.com/iDankest/keytrends-seo-mcp/issues" },
+  "homepage": "https://github.com/iDankest/keytrends-seo-mcp#readme",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=18.17" },
+  "bin": {
+    "seo-mcp": "dist/index.js",
+    "keytrends-seo-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": ["dist", "README.md", ".env.example"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke-stdio.mjs",
+    "healthcheck": "node dist/index.js --healthcheck",
+    "prepublishOnly": "npm run build && npm test && npm run smoke"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "zod": "^4.5.4"
+  },
+  "keywords": ["mcp", "seo", "aeo", "google-search-console", "keytrends"]
+}
