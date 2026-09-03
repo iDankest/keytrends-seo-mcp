@@ -221,14 +221,16 @@ export async function runHealthcheck(
       checks.push({
         id: 'ai_provider',
         status: 'pass',
-        detail: `Provider de IA gsc_export activo con directorio ${ctx.config.aiExportDir}`,
+        detail: ctx.config.aiExportUrls?.length
+          ? `Provider de IA gsc_export activo por URL: ${ctx.config.aiExportUrls.join(', ')}`
+          : `Provider de IA gsc_export activo con directorio ${ctx.config.aiExportDir}`,
       });
     } else {
       checks.push({
         id: 'ai_provider',
         status: 'warn',
-        detail:
-          'Provider de IA none: la API oficial de Google Search Console v1 no expone métricas de IA generativa (revisión 20260902). Activable mediante exportación CSV desde la UI con KEYTRENDS_AI_EXPORT_DIR.',
+          detail:
+            'Provider de IA none: la API oficial de Google Search Console v1 no expone métricas de IA generativa (revisión 20260902). Activable exportando el CSV de la UI y publicándolo con scripts/publish-ai-export.mjs (KEYTRENDS_AI_EXPORT_URL), o con KEYTRENDS_AI_EXPORT_DIR en local.',
       });
     }
   }
